@@ -1,0 +1,106 @@
+% Import necessary toolboxes
+import phased.*
+import comm.*
+
+% Constant Definitions
+nNodes = 10; % Number of wireless sensor nodes
+centerFrequency = 5e9; % Operating frequency (5 GHz - suitable for sub-6 GHz 5G)
+binaryDataSize = 1024; % Size of binary data to be transmitted by each node
+
+% Network and Antenna Setup
+nodes = cell(1,nNodes); % Create a wireless sensor network with antennas
+for k = 1:nNodes
+    % Create an isotropic antenna element for each node, with a specified frequency range of 2 GHz to 8 GHz
+    nodes{k} = phased.IsotropicAntennaElement('FrequencyRange', [2e9 8e9]);
+end
+
+% Spatial Setup
+% Random 3D positions for the nodes; Z-coordinates are all 0
+nodePos = [100*rand(2,nNodes); zeros(1,nNodes)];
+% Base station is located at the origin in 3D
+basePos = [0;0;0];
+
+% Define the propagation model with the same operating frequency
+% Assumes two-way propagation (to and from the base station)
+propModel = phased.FreeSpace('OperatingFrequency', centerFrequency, 'TwoWayPropagation', true);
+
+% Plot Node Positions and Antenna Directions
+figure;
+hold on;
+plot(basePos(1), basePos(2), 'ro', 'DisplayName', 'Base Station');
+for k = 1:nNodes
+    plot(nodePos(1,k), nodePos(2,k), 'bo', 'DisplayName', sprintf('Node %d', k));
+    quiver(nodePos(1,k), nodePos(2,k), basePos(1)-nodePos(1,k), basePos(2)-nodePos(2,k), 0.1, 'b');
+end
+xlabel('X Coordinate');
+ylabel('Y Coordinate');
+title('Node Positions and Antenna Directions');
+legend('Location','best');
+hold off;
+
+% Preallocate bit errors
+bitErrors = zeros(1,nNodes);
+
+% Data Transmission and Reception
+% Iterate over each node, transmit data, and receive it at the base station
+for k = 1:nNodes
+    % Generate random binary data at each node
+    data = randi([0 1], binaryDataSize, 1);
+    
+    % Apply BPSK modulation to the data
+    modData = pskmod(data, 2);
+
+
+    pt=(data);
+if(mod(length(pt),16)~=0)
+    pt= [pt, zeros(1, 16 -mod(length(pt),16))];
+end
+for i=1:16
+    dim=1;
+lb_pso=min(pt);
+ub_pso=max(pt);% Upper bounds
+ fobj = @CostFunction;
+[Best_score]=pso(dim,lb_pso,ub_pso,fobj);
+key(i)=round(Best_score.Cost);
+end
+s = aesinit(key);
+%%
+% ------------------------------------------------------------------------
+% ECB test of AES-128
+tic
+ct = aes(s, 'enc', 'ecb', pt);
+t1=toc
+    % Define the carrier signal and modulate the data onto the carrier signal
+    t = (0:length(modData)-1)';
+    carrier = cos(2*pi*centerFrequency*t);
+    txSig = modData .* carrier;
+
+    % Compute the angle to the base station from the node
+    pos_diff = basePos - nodePos(:,k);
+    azimuth = atan2d(pos_diff(2), pos_diff(1));
+
+    % Propagate the signal through the medium
+    sig = propModel(txSig, nodePos(:,k), basePos, [azimuth;0;0], [0;0;0]);
+
+    % Amplify the received signal (simple gain model for the receiving antenna)
+    receivedSig = sig;
+
+    % Demodulate the received signal to recover the original data
+    recvData = pskdemod(receivedSig, 2);
+
+    % Compare the transmitted and received data to check for transmission errors
+    nErrors = biterr(data, recvData);
+
+    % Output the number of errors for each node
+    fprintf('Node %d: %d errors\n', k, nErrors);
+
+    % Store bit errors for each node
+    bitErrors(k) = nErrors;
+end
+
+% Plot the bit errors for each node
+figure;
+bar(1:nNodes, bitErrors);
+xlabel('Node');
+ylabel('Bit Errors');
+title('Bit Errors for Each Node');
